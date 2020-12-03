@@ -2,14 +2,9 @@ import scrapy
 from scrapy.crawler import CrawlerProcess
 import csv
 import os
-
-n = 0
+import random
 
 #reference_data = str(input(" >>> ENTER THE FILENAME OF YOUR REFERENCE CSV (NO .CSV EXTENSION)"))
-
-with open('postcodes.csv', newline='') as f:
-    reader = csv.reader(f)
-    data = list(reader)
 
 
 class scraper(scrapy.Spider):
@@ -19,7 +14,7 @@ class scraper(scrapy.Spider):
 
     custom_settings = {"FEEDS": {
                             "scraped_data.csv": {"format": "csv",
-                                                   "encoding": "utf-8-sig"}
+                                                 "encoding": "utf-8-sig"}
                         },
                        "LOG_ENABLED": False,
                        "ROBOTSTXT_OBEY": False,
@@ -38,13 +33,24 @@ class scraper(scrapy.Spider):
                            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36'
                         }}
 
+    def __init__(self, *args, **kwargs):
+        super(scraper, self).__init__(*args, **kwargs)
+        self.proxy_pool = ['cjskitwk-dest:fx96whhbpj4b@209.127.191.180:80', 'cjskitwk-dest:fx96whhbpj4b@45.130.255.198:80', 'cjskitwk-dest:fx96whhbpj4b@45.130.255.243:80', 'cjskitwk-dest:fx96whhbpj4b@185.164.56.20:80', 'cjskitwk-dest:fx96whhbpj4b@45.130.255.147:80', 'cjskitwk-dest:fx96whhbpj4b@45.95.96.132:80', 'cjskitwk-dest:fx96whhbpj4b@45.95.96.237:80', 'cjskitwk-dest:fx96whhbpj4b@45.95.96.187:80', 'cjskitwk-dest:fx96whhbpj4b@45.94.47.66:80', 'cjskitwk-dest:fx96whhbpj4b@193.8.56.119:80']
+
+        with open('postcodes.csv', newline='') as f:
+            reader = csv.reader(f)
+            self.postcode_data = list(reader)
+
+        self.n = 0
+
     def parse(self, response):
-        global postcode_data
-        for postcode in postcode_data:
+        for postcode in self.postcode_data:
             form_data = {'Postcode': postcode[0], 'CaptchaDeText': 'd30e27ccf2bd4d8b8bcca06033ba6a5b',
                          'CaptchaInputText': '9ywnq3'}
 
-            yield scrapy.http.FormRequest('https://www.scottishepcregister.org.uk/CustomerFacingPortal/EPCPostcodeSearchResults', formdata=form_data, callback=self.parse_results)
+            proxy = random.choice(self.proxy_pool)
+
+            yield scrapy.http.FormRequest('https://www.scottishepcregister.org.uk/CustomerFacingPortal/EPCPostcodeSearchResults', formdata=form_data, meta={'proxy': proxy}, callback=self.parse_results)
 
     def parse_results(self, response):
         addresses = [u.strip().replace(r"\r\n", "") for u in response.xpath('//tr/td[1]/text()').extract()]
@@ -55,19 +61,18 @@ class scraper(scrapy.Spider):
 
         for d in data:
             path = "{p}.pdf".format(p=d[1])
-            yield scrapy.Request(d[2], meta={'path': path}, callback=self.save_pdf)
+            proxy = random.choice(self.proxy_pool)
+            yield scrapy.Request(d[2], meta={'path': path, 'proxy': proxy}, callback=self.save_pdf)
             yield {'Address': d[0], 'RRN': d[1], 'PDF URL': d[2]}
 
         next_page = ["https://www.scottishepcregister.org.uk{u}".format(u=u) for u in response.xpath('//li[contains(., "Next")]/a/@href').extract()]
 
         if len(next_page) > 0:
-            yield scrapy.Request(next_page[0], callback=self.parse_results)
+            yield scrapy.Request(next_page[0], meta=response.meta, callback=self.parse_results)
 
         else:
-            global n
-
-            n += 1
-            print(" >> SCRAPED {n} POSTCODES".format(n=n))
+            self.n += 1
+            print(" >> SCRAPED {n} POSTCODES".format(n=self.n))
 
     def save_pdf(self, response):
         if not os.path.exists('pdfs'):
